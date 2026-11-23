@@ -1,22 +1,36 @@
-import { useEffect, useState } from 'react';
-import { BrowserRouter, Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { BrowserRouter, Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/app/providers/AuthProvider';
 import { ToastProvider } from '@/app/providers/ToastProvider';
+import { ThemeProvider } from '@/app/providers/ThemeProvider';
+import { useTheme } from '@/app/providers/ThemeContext';
+import { Button } from '@/shared/components/ui/button';
+import { ArrowDown, ArrowRight, ArrowUpRight, Code2, Mail, PanelLeftOpen, Sparkles } from 'lucide-react';
 import Finance from '@/features/finance';
 import Ai from '@/features/ai';
 import Jobs from '@/features/ai/pages/JobsPage';
 import GoldPrediction from '@/features/gold';
 import ResourceWorkspace from '@/features/resources';
+import { environment } from '@/shared/config/env';
+import { getVisitorId } from '@/shared/utils/visitorId';
+
+interface DailyActivity {
+  date: string;
+  visits: number;
+  uniqueVisitors: number;
+}
+
+interface ActivitySummary {
+  totalVisits: number;
+  totalUniqueVisitors: number;
+  daily: DailyActivity[];
+}
 
 function ThemeShell() {
-  const [dark, setDark] = useState(() => localStorage.getItem('app-theme') === 'dark');
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark);
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    localStorage.setItem('app-theme', dark ? 'dark' : 'light');
-  }, [dark]);
+  const { dark, setDark } = useTheme();
   return (
     <div className="standalone-shell">
+      <VisitTracker />
       <GlobalNavbar dark={dark} setDark={setDark} />
       <Routes>
         <Route path="/" element={<Home />} />
@@ -34,42 +48,200 @@ function ThemeShell() {
   );
 }
 
+function VisitTracker() {
+  const location = useLocation();
+  const previousPath = useRef('');
+
+  useEffect(() => {
+    const route = location.pathname;
+    if (route === '/login' || previousPath.current === route) return;
+    previousPath.current = route;
+
+    const visitorId = getVisitorId();
+    void fetch(`${environment.financeApiUrl}/analytics/visits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ route, ...(visitorId ? { visitorId } : {}) }),
+    }).then(response => {
+      if (!response.ok) throw new Error(`Analytics request failed (${response.status})`);
+    }).catch(error => {
+      console.warn('Unable to record page visit:', error);
+    });
+  }, [location.pathname]);
+
+  return null;
+}
+
 function GlobalNavbar({ dark, setDark }: { dark: boolean; setDark: React.Dispatch<React.SetStateAction<boolean>> }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [activity, setActivity] = useState<ActivitySummary | null>(null);
+  const [activityError, setActivityError] = useState('');
+  const profileRef = useRef<HTMLDivElement>(null);
   const closeMobile = () => setMobileOpen(false);
+
+  useEffect(() => {
+    if (!profileOpen) return;
+    const controller = new AbortController();
+    const loadActivity = async () => {
+      try {
+        const response = await fetch(`${environment.financeApiUrl}/analytics/summary?days=7`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Activity request failed (${response.status})`);
+        const data = await response.json() as ActivitySummary;
+        if (!Array.isArray(data.daily)) throw new Error('Activity response was invalid');
+        setActivity(data);
+        setActivityError('');
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setActivityError(error instanceof Error ? error.message : 'Unable to load activity');
+      }
+    };
+
+    void loadActivity();
+    const intervalId = window.setInterval(() => void loadActivity(), 30_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [profileOpen]);
+
+  useEffect(() => {
+    if (!profileOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (event.target instanceof Node && !profileRef.current?.contains(event.target)) setProfileOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setProfileOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [profileOpen]);
+
   return (
-    <header className="home-nav global-app-nav">
-      <Link to="/" className="home-brand" aria-label="Sumanth workspace" onClick={closeMobile}>
-        <span className="brand-avatar">SN</span>
-        <strong>Sumanth</strong>
-      </Link>
-      <nav className="home-links" aria-label="Main navigation">
-        <NavLink to="/ai">AI Studio</NavLink>
-        <NavLink to="/finance">Finance</NavLink>
-        <NavLink to="/resources">Resources</NavLink>
-        <a href="/#experience">Experience</a>
-        <a href="/#skills">Skills</a>
-        <a href="https://github.com/" target="_blank" rel="noreferrer">GitHub</a>
-        <a href="https://www.linkedin.com/" target="_blank" rel="noreferrer">LinkedIn</a>
-      </nav>
-      <div className="home-actions">
-        <button type="button" className="icon-action" aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setDark(value => !value)}>
-          {dark ? '☀' : '☾'}
-        </button>
-        <a className="resume-button" href="/Resume.pdf" download>Download CV</a>
-        <button type="button" className="mobile-menu-button" aria-label="Toggle navigation menu" aria-expanded={mobileOpen} onClick={() => setMobileOpen(value => !value)}>
-          <span /><span /><span />
-        </button>
+    <header className="sticky top-0 z-50 w-full bg-white/85 dark:bg-zinc-900/90 backdrop-blur-xl border-b border-zinc-200/80 dark:border-zinc-800 shadow-xs">
+      <div className="h-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-6">
+          <Link to="/" className="flex items-center gap-3 shrink-0 group" onClick={closeMobile}>
+            <div className="relative flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-500 text-white font-bold text-sm shadow-sm ring-2 ring-indigo-500/20 group-hover:scale-105 transition-transform">
+              <span>SN</span>
+              <span className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border-2 border-white dark:border-zinc-900" />
+              </span>
+            </div>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-[15px] tracking-tight text-zinc-900 dark:text-zinc-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">Sumanth Nagireddi</span>
+                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold">Architect</span>
+              </div>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400 font-normal hidden md:block">Senior Full-Stack &amp; Systems</span>
+            </div>
+          </Link>
+        </div>
+
+        <nav className="hidden lg:flex items-center gap-1.5 p-1 bg-zinc-100/80 dark:bg-zinc-800/80 border border-zinc-200/90 dark:border-zinc-700 rounded-full shadow-xs backdrop-blur-md">
+          <NavLink to="/" end className={({ isActive }) => `px-3.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 ${isActive ? 'text-indigo-600 dark:text-indigo-400 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-xs font-semibold' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60'}`}>
+            {({ isActive }) => <>{isActive && <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 dark:bg-indigo-400" />}Showcase</>}
+          </NavLink>
+          <NavLink to="/ai" className={({ isActive }) => `px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${isActive ? 'text-indigo-600 dark:text-indigo-400 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-xs font-semibold' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60'}`}>AI Studio</NavLink>
+          <NavLink to="/gold-prediction" className={({ isActive }) => `px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${isActive ? 'text-indigo-600 dark:text-indigo-400 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-xs font-semibold' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60'}`}>Commodity Intel</NavLink>
+          <NavLink to="/resources" className={({ isActive }) => `px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${isActive ? 'text-indigo-600 dark:text-indigo-400 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-xs font-semibold' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60'}`}>Resources</NavLink>
+        </nav>
+
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="hidden sm:inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-semibold shadow-xs">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600" />
+            </span>
+            <span>Available</span>
+          </div>
+          <Button type="button" variant="outline" size="icon" aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setDark(v => !v)} className="p-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors shadow-xs">
+            <span className="material-symbols-outlined text-[18px] block">{dark ? 'dark_mode' : 'light_mode'}</span>
+          </Button>
+          <div className="profile-menu-wrap" ref={profileRef}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="profile-trigger"
+              aria-label="Open profile and site activity"
+              aria-expanded={profileOpen}
+              aria-controls="profile-activity-popover"
+              onClick={() => setProfileOpen(value => !value)}
+            >
+              <img alt="" src="/image.jpg" />
+            </Button>
+            {profileOpen && (
+              <section className="profile-popover" id="profile-activity-popover" aria-label="Profile and live site activity">
+                <div className="profile-popover-heading">
+                  <img alt="" src="/image.jpg" />
+                  <div><strong>Sumanth Nagireddi</strong><span>Personal workspace</span></div>
+                </div>
+                <Link to="/finance" className="profile-finance-link" onClick={() => setProfileOpen(false)}>
+                  <span><strong>Finance OS</strong><small>Open your private workspace</small></span>
+                  <ArrowUpRight size={16} />
+                </Link>
+                <div className="profile-activity">
+                  <div className="profile-activity-heading">
+                    <span><i /> Live site activity</span>
+                    <small>Last 7 days</small>
+                  </div>
+                  {activityError ? (
+                    <p className="profile-activity-message error">{activityError}</p>
+                  ) : !activity ? (
+                    <p className="profile-activity-message">Loading activity…</p>
+                  ) : (
+                    <>
+                      <div className="profile-activity-totals">
+                        <div><strong>{activity.totalUniqueVisitors}</strong><span>Unique visitors</span></div>
+                        <div><strong>{activity.totalVisits}</strong><span>Total visits</span></div>
+                      </div>
+                      <div className="profile-activity-days">
+                        {activity.daily.map(day => (
+                          <div key={day.date}>
+                            <span>{new Date(`${day.date}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })}</span>
+                            <strong>{day.uniqueVisitors} <small>unique</small></strong>
+                            <strong>{day.visits} <small>visits</small></strong>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="profile-activity-footnote">Anonymous browser IDs · refreshes every 30 seconds</p>
+                    </>
+                  )}
+                </div>
+              </section>
+            )}
+          </div>
+          <Button type="button" variant="outline" size="icon" className="lg:hidden p-2 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 shadow-xs" aria-label="Toggle navigation menu" aria-expanded={mobileOpen} onClick={() => setMobileOpen(v => !v)}>
+            <span className="material-symbols-outlined text-[20px] block">{mobileOpen ? 'close' : 'menu'}</span>
+          </Button>
+        </div>
       </div>
       {mobileOpen && (
-        <nav className="mobile-menu" aria-label="Mobile navigation">
-          <NavLink to="/ai" onClick={closeMobile}>AI Studio</NavLink>
-          <NavLink to="/finance" onClick={closeMobile}>Finance</NavLink>
-          <NavLink to="/resources" onClick={closeMobile}>Resources</NavLink>
-          <a href="/#experience" onClick={closeMobile}>Experience</a>
-          <a href="/#skills" onClick={closeMobile}>Skills</a>
-          <a href="https://github.com/" target="_blank" rel="noreferrer">GitHub</a>
-          <a href="https://www.linkedin.com/" target="_blank" rel="noreferrer">LinkedIn</a>
+        <nav className="lg:hidden border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3 flex flex-col gap-1" aria-label="Mobile navigation">
+          <NavLink to="/" end onClick={closeMobile} className={({ isActive }) => `px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${isActive ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Showcase</NavLink>
+          {window.location.pathname.startsWith('/resources') && (
+            <button
+              type="button"
+              className="mobile-resource-curriculum-link"
+              onClick={() => {
+                window.dispatchEvent(new Event('course:open-mobile-sidebar'));
+                closeMobile();
+              }}
+            >
+              <PanelLeftOpen size={17} /> Open resource curriculum
+            </button>
+          )}
+          <NavLink to="/ai" onClick={closeMobile} className={({ isActive }) => `px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${isActive ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>AI Studio</NavLink>
+          <NavLink to="/gold-prediction" onClick={closeMobile} className={({ isActive }) => `px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${isActive ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Commodity Intel</NavLink>
+          <NavLink to="/resources" onClick={closeMobile} className={({ isActive }) => `px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${isActive ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Resources</NavLink>
+          <a href="https://github.com/" target="_blank" rel="noreferrer" className="px-4 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">GitHub</a>
+          <a href="https://www.linkedin.com/" target="_blank" rel="noreferrer" className="px-4 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">LinkedIn</a>
         </nav>
       )}
     </header>
@@ -110,94 +282,150 @@ function Login() {
 }
 
 function Home() {
-  const joiningDate = new Date(2021, 10, 22); // November 22, 2021
-  const today = new Date();
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>('.portfolio-home');
+    if (!root || window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return;
 
-  const experience =
-    ((today.getTime() - joiningDate.getTime()) /
-      (1000 * 60 * 60 * 24 * 365.25)).toFixed(1);
+    const targets = root.querySelectorAll<HTMLElement>('.portfolio-shell > section, .portfolio-work-card, .portfolio-footer');
+    root.classList.add('portfolio-reveal-ready');
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add('is-visible');
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -36px 0px' });
+
+    targets.forEach(target => observer.observe(target));
+    return () => {
+      observer.disconnect();
+      root.classList.remove('portfolio-reveal-ready');
+    };
+  }, []);
+
   return (
-    <main className="clerk-home">
-      <div className="home-main">
-        <section className="hero">
-          <div className="hero-grid" aria-hidden="true" />
-          <div className="hero-copy-block">
-            <div className="hero-badge"><span className="status-dot" />Available for ambitious projects</div>
-            <h1>Engineering ideas into<br /><span>intelligent solutions.</span></h1>
-            <p className="hero-copy">Full-stack developer crafting scalable web platforms, intelligent workflows, and seamless digital experiences with Angular, React, Node.js, and NestJS.</p>
-            <div className="hero-actions"><Link to="/ai" className="primary-button">Explore AI Studio</Link><Link to="/resources" className="secondary-button">Browse resources</Link></div>
-          </div>
-          <div className="hero-profile">
-            <div className="profile-orbit orbit-one" aria-hidden="true" />
-            <div className="profile-orbit orbit-two" aria-hidden="true" />
-            <img src="/image.jpg" alt="Sumanth Nagireddi" />
-            <div className="profile-card"><span className="profile-status" /><div><strong>Sumanth Nagireddi</strong><small>Senior Full-Stack Engineer</small></div></div>
-          </div>
-        </section>
-
-        <section className="feature-shell reveal" aria-label="Featured workspace">
-          <div className="feature-tabs">
-            <Link to="/ai" className="feature-tab active"><span className="tab-dot" />AI Studio</Link>
-            <Link to="/resources" className="feature-tab"><span className="tab-dot" />Knowledge base</Link>
-            <Link to="/playbook" className="feature-tab"><span className="tab-dot" />Developer playbook</Link>
-          </div>
-          <div className="workspace-preview">
-            <aside className="preview-sidebar">
-              <div className="preview-brand"><span className="preview-logo">SN</span><span>Engineering</span></div>
-              <div className="preview-nav">
-                <span className="preview-label">Workspace</span>
-                <span className="preview-item active"><span className="preview-icon">⌂</span> Overview</span>
-                <span className="preview-item"><span className="preview-icon">✦</span> AI Studio</span>
-                <span className="preview-item"><span className="preview-icon">⌘</span> Resources</span>
-                <span className="preview-item"><span className="preview-icon">↗</span> Projects</span>
-              </div>
-            </aside>
-            <div className="preview-content">
-              <div className="preview-header"><div><span className="preview-kicker">Engineering overview</span><h2>Ideas in motion</h2></div><span className="preview-period">Updated today</span></div>
-              <div className="preview-stats">
-                <article><span>Experience</span><strong>{experience} years</strong><small>Full-stack engineering</small></article>
-                <article><span>Core stack</span><strong>React + Node</strong><small>Product delivery</small></article>
-                <article><span>Current focus</span><strong>AI Native</strong><small>Building smarter workflows</small></article>
-              </div>
-              <div className="preview-chart"><div className="chart-heading"><div><span>Weekly engineering activity</span><strong>Consistent momentum</strong></div><span className="chart-period">7 days</span></div><div className="chart-bars" aria-hidden="true">{[46, 64, 52, 78, 68, 92, 84].map((height, index) => <span key={index} style={{ height: `${height}%` }} />)}</div></div>
+    <main className="portfolio-home">
+      <div className="portfolio-shell">
+        <section className="portfolio-hero" aria-labelledby="portfolio-title">
+          <div className="portfolio-hero-copy">
+            <div className="portfolio-eyebrow"><span className="portfolio-live-dot" /> FULL-STACK ENGINEER <span className="portfolio-eyebrow-divider">/</span> HYDERABAD, INDIA</div>
+            <h1 id="portfolio-title">I build digital products that make <span>complex work feel simple.</span></h1>
+            <p className="portfolio-lede">I’m Sumanth — a product-minded engineer who connects thoughtful design, reliable systems, and practical AI to ship experiences people love using.</p>
+            <div className="portfolio-hero-actions">
+              <a className="portfolio-button portfolio-button-dark" href="mailto:you@example.com">Let’s work together <ArrowUpRight size={17} /></a>
+              <a className="portfolio-text-link" href="#selected-work">Explore my work <ArrowDown size={15} /></a>
             </div>
+            <div className="portfolio-hero-footnote"><span><Code2 size={15} /> From first sketch to production</span><span>Open to meaningful opportunities</span></div>
+          </div>
+          <div className="portfolio-portrait-wrap">
+            <div className="portfolio-portrait-glow" aria-hidden="true" />
+            <div className="portfolio-portrait-frame">
+              <img src="/image.jpg" alt="Portrait of Sumanth Nagireddi" />
+              <span className="portfolio-portrait-index">SN—01</span>
+            </div>
+            <div className="portfolio-float-card portfolio-location-card"><span className="portfolio-card-icon"><Sparkles size={16} /></span><span><strong>Engineering with intent</strong><small>Good work, built to last.</small></span></div>
+            <div className="portfolio-float-card portfolio-stack-card"><span className="portfolio-stack-mark">TS</span><span><strong>TypeScript-first</strong><small>React · Node · NestJS</small></span></div>
+          </div>
+          <a className="portfolio-scroll-cue" href="#selected-work" aria-label="Scroll to selected work"><span /> SCROLL TO EXPLORE</a>
+        </section>
+
+        <section className="portfolio-proof" aria-label="At a glance">
+          <div className="portfolio-proof-intro">A little about<br />how I work</div>
+          <div><strong>End to end</strong><span>Own the whole product journey</span></div>
+          <div><strong>Systems minded</strong><span>Build for clarity and scale</span></div>
+          <div><strong>People first</strong><span>Make technology feel human</span></div>
+        </section>
+
+        <section className="portfolio-work-section" id="selected-work">
+          <div className="portfolio-section-heading">
+            <div><span className="portfolio-section-index">01 / SELECTED WORK</span><h2>Built to be useful.<br /><span>Designed to feel right.</span></h2></div>
+            <p>A few corners of my engineering world — each one shaped around a real workflow, a clear purpose, and the details that make it work.</p>
+          </div>
+          <div className="portfolio-work-grid">
+            <Link to="/ai" className="portfolio-work-card portfolio-work-ai">
+              <div className="portfolio-work-top"><span>01 — INTELLIGENCE</span><ArrowUpRight size={18} /></div>
+              <div className="portfolio-work-art portfolio-ai-art" aria-hidden="true"><div className="portfolio-ai-orbit orbit-a" /><div className="portfolio-ai-orbit orbit-b" /><div className="portfolio-ai-core"><Sparkles size={25} /></div><span className="portfolio-ai-caption">A better kind of conversation</span></div>
+              <div className="portfolio-work-info"><div><h3>AI Studio</h3><p>Practical AI experiences for thinking, creating, and getting work done.</p></div><span className="portfolio-work-arrow"><ArrowRight size={17} /></span></div>
+              <div className="portfolio-work-tags"><span>AI workflows</span><span>Product thinking</span><span>React</span></div>
+            </Link>
+            <Link to="/resources" className="portfolio-work-card portfolio-work-knowledge">
+              <div className="portfolio-work-top"><span>02 — KNOWLEDGE SYSTEM</span><ArrowUpRight size={18} /></div>
+              <div className="portfolio-work-art portfolio-knowledge-art" aria-hidden="true"><div className="portfolio-note note-one"><span>01</span><i /><i /><i /></div><div className="portfolio-note note-two"><span>02</span><i /><i /></div><div className="portfolio-note note-three"><span>03</span><i /><i /><i /></div><div className="portfolio-note-label">Knowledge, connected.</div></div>
+              <div className="portfolio-work-info"><div><h3>Engineering Notebook</h3><p>A living library for ideas, technical notes, and knowledge worth keeping.</p></div><span className="portfolio-work-arrow"><ArrowRight size={17} /></span></div>
+              <div className="portfolio-work-tags"><span>Confluence</span><span>Documentation</span><span>Developer experience</span></div>
+            </Link>
+            <Link to="/gold-prediction" className="portfolio-work-card portfolio-work-markets">
+              <div className="portfolio-work-top"><span>03 — MARKET INTELLIGENCE</span><ArrowUpRight size={18} /></div>
+              <div className="portfolio-work-art portfolio-market-art" aria-hidden="true"><span className="portfolio-market-label">GOLD / 24K</span><strong>₹ 9,842<span>.60</span></strong><div className="portfolio-market-chart"><svg viewBox="0 0 360 112" preserveAspectRatio="none"><defs><linearGradient id="portfolio-chart-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="currentColor" stopOpacity=".22" /><stop offset="100%" stopColor="currentColor" stopOpacity="0" /></linearGradient></defs><path d="M0 94 C30 90 35 68 60 75 S94 42 122 56 S160 68 188 42 S224 54 250 31 S283 44 304 18 S338 30 360 8 L360 112 L0 112Z" fill="url(#portfolio-chart-fill)" /><path d="M0 94 C30 90 35 68 60 75 S94 42 122 56 S160 68 188 42 S224 54 250 31 S283 44 304 18 S338 30 360 8" fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg></div><span className="portfolio-market-tag">LIVE FORECAST · AI ASSISTED</span></div>
+              <div className="portfolio-work-info"><div><h3>Commodity Intel</h3><p>Make market movement easier to read with forecast-led insights.</p></div><span className="portfolio-work-arrow"><ArrowRight size={17} /></span></div>
+              <div className="portfolio-work-tags"><span>Forecasting</span><span>Data products</span><span>AI-assisted</span></div>
+            </Link>
           </div>
         </section>
 
-        <section className="metrics-section"><article><strong>{experience}+</strong><span>Years of engineering experience</span></article><article><strong>+</strong><span>Core technologies across product stacks</span></article><article><strong>End-to-end</strong><span>From architecture to polished delivery</span></article><article><strong>AI-ready</strong><span>Practical workflows built into products</span></article></section>
-        <section id="experience" className="experience-section"><div className="experience-heading"><div><p className="section-kicker">Experience</p><h2>Turning complex systems into clear product experiences.</h2></div><p>Product-minded engineering across web applications, APIs, cloud-ready services, and AI-assisted workflows.</p></div><div className="experience-grid">
-          <article className="experience-card"><div className="experience-meta"><span>November 2021 — June 2024</span><span>01</span></div><h3>Infosys</h3><p className="role-name">Full-stack Developer</p><p>Built responsive, business-critical web applications and reusable component systems.</p><div className="experience-tags"><span>React</span><span>Angular</span><span>REST APIs</span><span>TypeScript</span></div></article>
-          <article className="experience-card"><div className="experience-meta"><span>June 2024 — December 2024</span><span>02</span></div><h3>Nagarro</h3><p className="role-name">Full-stack Developer</p><p>Delivered enterprise-scale applications with API integration and modern frontend patterns.</p><div className="experience-tags"><span>React</span><span>Node.js</span><span>Azure</span><span>NestJS</span></div></article>
-          <article className="experience-card"><div className="experience-meta"><span>December 2024 — Present</span><span>03</span></div><h3>EPAM Systems</h3><p className="role-name">Full-stack Developer</p><p>Engineering robust, accessible enterprise applications with a focus on architecture, performance, API integration, and production-quality delivery.</p><div className="experience-tags"><span>Enterprise apps</span><span>Architecture</span><span>Cloud</span><span>AI workflows</span></div></article>
-        </div></section>
-        <section id="skills" className="skills-section">
-          <div className="skills-intro"><p className="section-kicker">Capabilities</p><h2>A full-stack toolkit for building complete products.</h2></div>
-          <div className="skills-grid">
-            <article className="skill-card skill-featured"><div className="skill-card-heading"><span className="skill-number">01</span><span className="skill-status">Primary</span></div><h3>Frontend Engineering</h3><p>Building polished, accessible interfaces with strong component architecture, responsive behavior, state management, and reusable design systems.</p><div className="skill-list"><span>Angular</span><span>React</span><span>Next.js</span><span>TypeScript</span><span>RxJS</span><span>HTML / CSS</span></div></article>
-            <article className="skill-card"><div className="skill-card-heading"><span className="skill-number">02</span><span className="skill-status">Primary</span></div><h3>Backend & APIs</h3><p>Designing secure APIs and maintainable services with clear contracts, authentication, validation, data modeling, and dependable integrations.</p><div className="skill-list"><span>Node.js</span><span>NestJS</span><span>REST</span><span>PostgreSQL</span><span>Auth</span></div></article>
-            <article className="skill-card"><div className="skill-card-heading"><span className="skill-number">03</span><span className="skill-status">Delivery</span></div><h3>Engineering Delivery</h3><p>Translating product goals into reliable technical solutions through design reviews, iterative delivery, testing, performance work, and ownership.</p><div className="skill-list"><span>System design</span><span>Performance</span><span>Git</span><span>Testing</span><span>CI/CD</span></div></article>
-            <article className="skill-card"><div className="skill-card-heading"><span className="skill-number">04</span><span className="skill-status">Growing</span></div><h3>AI & Developer Experience</h3><p>Creating practical AI-assisted experiences, prototypes, workflow automation, documentation tools, and developer-focused interfaces.</p><div className="skill-list"><span>AI SDKs</span><span>Prompt workflows</span><span>Automation</span><span>DX tooling</span></div></article>
+        <section className="portfolio-about" id="about">
+          <div className="portfolio-about-aside"><span className="portfolio-section-index">02 / THE APPROACH</span><div className="portfolio-about-stamp">MAKE<br />IT<br /><em>MATTER.</em></div></div>
+          <div className="portfolio-about-copy"><p className="portfolio-about-kicker">Engineering is a team sport.</p><h2>Good software is more than code. It’s <span>clear thinking, good taste, and care for the people on the other side.</span></h2><p>I work across the stack — from shaping the problem and designing the system to building the interface, shipping the API, and making sure the details hold up in production.</p><div className="portfolio-skill-row"><span>Product-minded</span><span>Full-stack</span><span>Systems design</span><span>AI-native</span></div></div>
+        </section>
+
+        <section className="portfolio-toolkit" id="toolkit">
+          <div className="portfolio-section-heading">
+            <div><span className="portfolio-section-index">03 / THE TOOLKIT</span><h2>The right tools.<br /><span>Thoughtfully applied.</span></h2></div>
+            <p>I like choosing technology to fit the problem — keeping the stack understandable, the interfaces useful, and the system ready to evolve.</p>
+          </div>
+          <div className="portfolio-toolkit-grid">
+            <article className="portfolio-toolkit-card">
+              <span className="portfolio-toolkit-number">01</span>
+              <h3>Product interfaces</h3>
+              <p>Clear, responsive experiences that make complex workflows easier to use.</p>
+              <div><span>React</span><span>TypeScript</span><span>Design systems</span></div>
+            </article>
+            <article className="portfolio-toolkit-card">
+              <span className="portfolio-toolkit-number">02</span>
+              <h3>Reliable services</h3>
+              <p>Practical APIs and backend foundations built around the needs of the product.</p>
+              <div><span>Node.js</span><span>NestJS</span><span>API design</span></div>
+            </article>
+            <article className="portfolio-toolkit-card">
+              <span className="portfolio-toolkit-number">03</span>
+              <h3>Connected systems</h3>
+              <p>Thoughtful integration across data, tools, and the people who depend on them.</p>
+              <div><span>Systems thinking</span><span>AI workflows</span><span>Documentation</span></div>
+            </article>
           </div>
         </section>
 
-        <section className="stack-section"><p className="section-kicker">Built across the stack</p><h2>One engineer. End-to-end product ownership.</h2><div className="stack-list"><span>Angular</span><span>React</span><span>Next.js</span><span>Node.js</span><span>NestJS</span><span>TypeScript</span><span>PostgreSQL</span><span>AI SDKs</span></div></section>
-        <section className="testimonials-section"><div className="testimonials-heading"><p className="section-kicker">Working together</p><h2>Engineering built on clarity, ownership, and momentum.</h2></div><div className="testimonial-grid"><article><div className="quote-mark">“</div><p>Strong engineering starts with understanding the product. Every implementation should reduce complexity, not move it somewhere else.</p><span><strong>Product thinking</strong><small>Start with the problem</small></span></article><article><div className="quote-mark">“</div><p>Reliable software is the result of clear architecture, accessible interfaces, thoughtful testing, and continuous improvement.</p><span><strong>Engineering quality</strong><small>Built for the long term</small></span></article><article><div className="quote-mark">“</div><p>The best collaboration keeps momentum visible—shared context, direct communication, small decisions, and measurable progress.</p><span><strong>Team momentum</strong><small>Clear and collaborative</small></span></article></div></section>
-        <section className="workspace-grid"><Link to="/ai" className="workspace-card ai-card"><div className="card-topline"><span className="card-icon">AI</span><span>01</span></div><h2>AI Studio</h2><p>Chat with connected models and explore practical AI-assisted engineering workflows.</p><span className="card-link">Open studio →</span></Link><Link to="/resources" className="workspace-card"><div className="card-topline"><span className="card-icon">KB</span><span>02</span></div><h2>Resources</h2><p>Browse architecture notes, interview materials, and reusable engineering knowledge.</p><span className="card-link">Browse knowledge →</span></Link><a href="https://github.com/" target="_blank" rel="noreferrer" className="workspace-card"><div className="card-topline"><span className="card-icon">GH</span><span>03</span></div><h2>Open Source</h2><p>Explore recent repositories, experiments, code samples, and public engineering work.</p><span className="card-link">Visit GitHub →</span></a></section>
-        <section className="contact-section"><div className="contact-grid" aria-hidden="true" /><span className="contact-kicker">Have a product in mind?</span><h2>Let’s build something<br /><span>worth using.</span></h2><div className="contact-actions"><a href="mailto:you@example.com" className="primary-button">Start a conversation</a><a href="https://www.linkedin.com/" target="_blank" rel="noreferrer" className="secondary-button">Connect on LinkedIn</a></div></section>
+        <section className="portfolio-principles" id="principles">
+          <div className="portfolio-principles-heading">
+            <span className="portfolio-section-index">04 / WHAT MATTERS</span>
+            <h2>Details add up<br /><span>to trust.</span></h2>
+          </div>
+          <div className="portfolio-principles-grid">
+            <article><span>01</span><h3>Clarity over cleverness</h3><p>Make the product and the code easier for the next person to understand.</p></article>
+            <article><span>02</span><h3>Useful by design</h3><p>Start with the real workflow, then make every interaction earn its place.</p></article>
+            <article><span>03</span><h3>Ship, learn, improve</h3><p>Deliver in thoughtful steps, listen to what happens, and keep making it better.</p></article>
+          </div>
+        </section>
+
+        <section className="portfolio-career" id="experience">
+          <div className="portfolio-career-heading"><span className="portfolio-section-index">05 / THE JOURNEY</span><h2>Good teams.<br /><span>Hard problems.</span></h2></div>
+          <div className="portfolio-career-list">
+            <article><span className="portfolio-career-date">2024 — NOW</span><div><h3>EPAM Systems</h3><p>Full-stack Developer · Enterprise applications, architecture, and production-quality delivery.</p></div><span className="portfolio-career-number">03</span></article>
+            <article><span className="portfolio-career-date">2024</span><div><h3>Nagarro</h3><p>Full-stack Developer · Enterprise product delivery and modern application patterns.</p></div><span className="portfolio-career-number">02</span></article>
+            <article><span className="portfolio-career-date">2021 — 2024</span><div><h3>Infosys</h3><p>Full-stack Developer · Business-critical applications and reusable component systems.</p></div><span className="portfolio-career-number">01</span></article>
+          </div>
+        </section>
+
+        <section className="portfolio-contact" id="contact">
+          <div className="portfolio-contact-orb" aria-hidden="true" />
+          <span className="portfolio-section-index">06 / YOUR NEXT BIG IDEA</span>
+          <h2>Let’s make<br /><em>something matter.</em></h2>
+          <p>Have an ambitious product, a tricky system, or a team that cares about doing things well? I’d love to hear about it.</p>
+          <div className="portfolio-contact-actions"><a className="portfolio-button portfolio-button-light" href="mailto:you@example.com"><Mail size={16} /> Start a conversation <ArrowUpRight size={17} /></a><a href="https://www.linkedin.com/" target="_blank" rel="noreferrer" aria-label="LinkedIn"><span className="portfolio-linkedin-mark" aria-hidden="true">in</span></a><a href="https://github.com/" target="_blank" rel="noreferrer" aria-label="GitHub"><Code2 size={18} /></a></div>
+          <span className="portfolio-contact-signature">Sumanth Nagireddi · Hyderabad, India</span>
+        </section>
       </div>
-      <footer className="home-footer">
-        <div className="footer-inner">
-          <div className="footer-brand">
-            <Link to="/" className="home-brand"><span className="brand-avatar">SN</span><span>Sumanth</span></Link>
-            <p>Building reliable products, thoughtful developer tools, and connected web experiences.</p>
-          </div>
-          <nav className="footer-links" aria-label="Explore">
-            <div><strong>Workspace</strong><Link to="/ai">AI Studio</Link><Link to="/resources">Resources</Link><Link to="/playbook">Playbook</Link></div>
-            <div><strong>Connect</strong><a href="https://github.com/" target="_blank" rel="noreferrer">GitHub</a><a href="https://www.linkedin.com/" target="_blank" rel="noreferrer">LinkedIn</a><a href="mailto:you@example.com">Email</a></div>
-          </nav>
-        </div>
-        <div className="footer-bottom"><span>© 2026 Sumanth Nagireddi</span><span>Built with React, TypeScript & NestJS</span></div>
-      </footer>
+      <footer className="portfolio-footer"><Link to="/" className="portfolio-footer-brand">SN<span>.</span></Link><span>Built with intention, shipped with care.</span><span>© 2026 Sumanth Nagireddi</span></footer>
     </main>
   );
 }
@@ -354,7 +582,9 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
-          <ThemeShell />
+          <ThemeProvider>
+            <ThemeShell />
+          </ThemeProvider>
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

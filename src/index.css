@@ -1,12 +1,19 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 @import "./shared/styles/landing.css";
 @import "./shared/styles/app-global.css";
 @import "./features/gold/styles/gold.css";
 @import "./shared/styles/resources.css";
+@import "./shared/styles/resources-redesign.css";
+@import "./shared/styles/shadcn-theme.css";
+@import "./shared/styles/portfolio-home.css";
 
-:root { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
+:root { font-family: var(--font-sans); }
+::selection { background: rgba(99, 102, 241, 0.2); color: #312e81; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #f4f4f5; }
+::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
 html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
 body { background: var(--canvas, #f7f8fb); color: var(--ink, #111827); }
 button, input, textarea, select { font: inherit; }

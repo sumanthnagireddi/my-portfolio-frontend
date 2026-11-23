@@ -67,7 +67,7 @@ html.dark {
 /* ─── Dark Mode body override ─────────────────────────────────────────────── */
 html.dark body {
   background: var(--claude-bg);
-  color: #e2e8f0;
+  color: var(--foreground, var(--ink));
 }
 
 /* ─── Finance Dashboard Claude Theme Overrides ────────────────────────────── */
@@ -904,9 +904,224 @@ html.dark .finance-clerk-page [class*="bg-slate-100"] {
   background-color: var(--canvas-strong) !important;
 }
 
-html.dark .finance-clerk-page [class*="text-slate-"],
-html.dark .finance-clerk-page [class*="text-zinc-"] {
+html.dark .finance-clerk-page :is(.text-slate-950, .text-slate-900, .text-slate-800, .text-slate-700, .text-zinc-950, .text-zinc-900, .text-zinc-800, .text-zinc-700) {
   color: var(--ink) !important;
+}
+
+html.dark .finance-clerk-page :is(.text-slate-600, .text-slate-500, .text-slate-400, .text-zinc-600, .text-zinc-500, .text-zinc-400) {
+  color: var(--muted) !important;
+}
+
+/* Private workspace and live activity in the profile menu */
+.profile-menu-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.profile-trigger {
+  width: 38px;
+  height: 38px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 2px;
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.profile-trigger:hover,
+.profile-trigger[aria-expanded='true'] {
+  background: var(--secondary);
+}
+
+.profile-trigger img,
+.profile-popover-heading img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 9px;
+  object-fit: cover;
+}
+
+.profile-popover {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 12px);
+  right: 0;
+  width: min(360px, calc(100vw - 24px));
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 18px 48px rgb(9 9 11 / 0.18);
+}
+
+.profile-popover-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+.profile-popover-heading img {
+  width: 40px;
+  height: 40px;
+}
+
+.profile-popover-heading strong,
+.profile-popover-heading span,
+.profile-finance-link strong,
+.profile-finance-link small {
+  display: block;
+}
+
+.profile-popover-heading strong,
+.profile-finance-link strong {
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.profile-popover-heading span,
+.profile-finance-link small {
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
+
+.profile-finance-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 10px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 11px;
+  padding: 12px;
+  background: var(--secondary);
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+.profile-finance-link:hover {
+  border-color: var(--ring);
+}
+
+.profile-finance-link > svg {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+
+.profile-activity {
+  border-top: 1px solid var(--border-color);
+  padding: 13px 14px 12px;
+}
+
+.profile-activity-heading,
+.profile-activity-heading > span {
+  display: flex;
+  align-items: center;
+}
+
+.profile-activity-heading {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profile-activity-heading > span {
+  gap: 7px;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.profile-activity-heading i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #16a34a;
+  box-shadow: 0 0 0 3px rgb(22 163 74 / 0.12);
+}
+
+.profile-activity-heading > small,
+.profile-activity-footnote {
+  color: var(--muted-foreground);
+  font-size: 0.63rem;
+}
+
+.profile-activity-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.profile-activity-totals > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  padding: 9px 10px;
+  background: var(--background);
+}
+
+.profile-activity-totals strong {
+  font-size: 1.08rem;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+}
+
+.profile-activity-totals span {
+  color: var(--muted-foreground);
+  font-size: 0.65rem;
+}
+
+.profile-activity-days {
+  display: grid;
+  gap: 1px;
+}
+
+.profile-activity-days > div {
+  min-height: 28px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 75px 62px;
+  align-items: center;
+  gap: 7px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 66%, transparent);
+  color: var(--muted-foreground);
+  font-size: 0.66rem;
+}
+
+.profile-activity-days > div:last-child {
+  border-bottom: 0;
+}
+
+.profile-activity-days strong {
+  color: var(--foreground);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-align: right;
+}
+
+.profile-activity-days strong small {
+  color: var(--muted-foreground);
+  font-size: 0.58rem;
+  font-weight: 450;
+}
+
+.profile-activity-footnote {
+  margin: 9px 0 0;
+  line-height: 1.45;
+}
+
+.profile-activity-message {
+  margin: 13px 0 4px;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
+
+.profile-activity-message.error {
+  color: var(--destructive);
 }
 
 html.dark .finance-clerk-page [class*="text-gray-"],

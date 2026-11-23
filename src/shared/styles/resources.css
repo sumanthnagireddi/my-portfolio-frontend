@@ -478,8 +478,53 @@
   color: var(--accent);
 }
 
-.docs-toc {
-  display: none;
+.docs-toc-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.docs-page-navigation {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 64px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.docs-page-nav-link {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.docs-page-nav-link:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}
+
+.docs-page-nav-link.next {
+  text-align: right;
+}
+
+.docs-page-nav-link span {
+  color: var(--text-soft);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.docs-page-nav-link strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
 }
 
 /* ─── Dark Mode Overrides ────────────────────────────────────────────────── */

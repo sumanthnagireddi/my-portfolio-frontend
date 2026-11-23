@@ -21,6 +21,11 @@ export interface ResourcePage {
   url: string;
 }
 
+let treeCache: ResourceTreeNode[] | null = null;
+let treePromise: Promise<ResourceTreeNode[]> | null = null;
+const pageCache = new Map<string, ResourcePage>();
+const pagePromises = new Map<string, Promise<ResourcePage>>();
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${environment.resourcesApiUrl}${path}`, {
     ...init,
@@ -46,11 +51,46 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const resourcesService = {
   getTree(spaceKey?: string, signal?: AbortSignal) {
-    const query = spaceKey ? `?spaceKey=${encodeURIComponent(spaceKey)}` : '';
-    return request<ResourceTreeNode[]>(`/atlassian/v2/folders${query}`, { signal });
+    if (spaceKey) {
+      const query = `?spaceKey=${encodeURIComponent(spaceKey)}`;
+      return request<ResourceTreeNode[]>(`/atlassian/v2/folders${query}`, { signal });
+    }
+    if (treeCache) return Promise.resolve(treeCache);
+    if (!treePromise) {
+      treePromise = request<ResourceTreeNode[]>('/atlassian/v2/folders', { signal })
+        .then(tree => {
+          treeCache = tree;
+          return tree;
+        })
+        .finally(() => {
+          treePromise = null;
+        });
+    }
+    return treePromise;
   },
   getPage(pageId: string, signal?: AbortSignal) {
-    return request<ResourcePage>(`/atlassian/v2/pages/${encodeURIComponent(pageId)}`, { signal });
+    const cached = pageCache.get(pageId);
+    if (cached) return Promise.resolve(cached);
+    const pending = pagePromises.get(pageId);
+    if (pending) return pending;
+    const promise = request<ResourcePage>(`/atlassian/v2/pages/${encodeURIComponent(pageId)}`, { signal })
+      .then(page => {
+        pageCache.set(pageId, page);
+        return page;
+      })
+      .finally(() => {
+        pagePromises.delete(pageId);
+      });
+    pagePromises.set(pageId, promise);
+    return promise;
+  },
+  clearTreeCache() {
+    treeCache = null;
+    treePromise = null;
+  },
+  clearPageCache(pageId?: string) {
+    if (pageId) pageCache.delete(pageId);
+    else pageCache.clear();
   },
   updatePage(pageId: string, title: string, body: string, parentId?: string, signal?: AbortSignal) {
     return request<ResourcePage>(`/atlassian/v2/pages/${encodeURIComponent(pageId)}`, {

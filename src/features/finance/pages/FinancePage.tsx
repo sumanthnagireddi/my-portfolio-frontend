@@ -12,6 +12,7 @@ import {
 } from '../services/finance.service';
 import { useToast } from '../../../app/providers/ToastProvider';
 import { useAuth } from '../../../app/providers/AuthProvider';
+import { Button } from '@/shared/components/ui/button';
 
 // Import refactored subcomponents
 import OverviewTab from '../components/OverviewTab';
@@ -165,20 +166,7 @@ export default function FinanceDashboard() {
   }, [selectedMonth]);
 
   const { showToast: _globalShowToast } = useToast();
-  const { logout, username } = useAuth();
-  useEffect(() => {
-    const visitorId = localStorage.getItem('fl_visitor_id') || 'unknown';
-    void fetch(`${getApiUrl()}/analytics/visits`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        route: `/finance#${activeTab}`,
-        visitorId,
-        username: username || 'anonymous',
-        referrer: document.referrer || '',
-      }),
-    }).catch(() => undefined);
-  }, [activeTab, username]);
+  const { logout } = useAuth();
   const triggerToast = (msg: string) => {
     _globalShowToast(msg, 'success');
   };
@@ -554,13 +542,15 @@ export default function FinanceDashboard() {
               ))}
             </select>
           </div>
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             type="button"
             onClick={() => setShowManageTabsModal(true)}
             className="h-10 px-3 rounded-xl border border-[color:var(--claude-border)] bg-[color:var(--claude-bg-strong)] text-xs font-semibold text-[color:var(--claude-ink-sub)] hover:text-[color:var(--claude-ink)] transition"
           >
             Manage tabs
-          </button>
+          </Button>
         </div>
       </div>
 

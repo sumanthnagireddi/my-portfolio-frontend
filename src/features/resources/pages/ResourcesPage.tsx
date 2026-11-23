@@ -1,8 +1,22 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, Search, Star, Lock, Share2, MoreHorizontal, Plus, PanelLeftClose, PanelLeftOpen, Copy, CornerDownRight, Pencil, Trash2, ArrowRight, Link2, EyeOff } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, PanelLeftOpen, PanelLeftClose, PanelRightClose, PanelRightOpen, Search, Moon, Sun, X, Plus, Pencil, Trash2, Copy } from 'lucide-react';
+import Prism from 'prismjs';
+import 'prismjs/components/prism-clike';
+import 'prismjs/components/prism-javascript';
+import 'prismjs/components/prism-jsx';
+import 'prismjs/components/prism-typescript';
+import 'prismjs/components/prism-tsx';
+import 'prismjs/components/prism-json';
+import 'prismjs/components/prism-bash';
+import 'prismjs/components/prism-css';
+import 'prismjs/components/prism-markup';
+import 'prismjs/components/prism-sql';
 import { flattenResourcePages, resourcesService, type ResourcePage, type ResourceTreeNode } from '../services/resources.service';
 import { adfToHtml } from '../utils/adf-to-html';
+import { Button } from '@/shared/components/ui/button';
+import { Input } from '@/shared/components/ui/input';
+import { useTheme } from '@/app/providers/ThemeContext';
 
 export default function ResourcesPage() {
   const { '*': pagePath } = useParams();
@@ -13,71 +27,74 @@ export default function ResourcesPage() {
   const [pageLoading, setPageLoading] = useState(false);
   const [treeError, setTreeError] = useState('');
   const [pageError, setPageError] = useState('');
-  const [saveError, setSaveError] = useState('');
-  const [saved, setSaved] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [sidebarView, setSidebarView] = useState<ResourceTreeNode | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(() => localStorage.getItem('course-selected-folder-id'));
+  const [sidebarDirection, setSidebarDirection] = useState<'forward' | 'back'>('forward');
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const stored = Number(localStorage.getItem('resources-sidebar-width'));
-    return Number.isFinite(stored) && stored >= 240 && stored <= 480 ? stored : 280;
+    const stored = Number(localStorage.getItem('course-sidebar-width'));
+    return Number.isFinite(stored) && stored >= 240 && stored <= 420 ? stored : 300;
   });
   const [resizingSidebar, setResizingSidebar] = useState(false);
-  const [actionMenu, setActionMenu] = useState<string | null>(null);
-  const [modal, setModal] = useState<{
-    kind: 'create' | 'rename' | 'copy' | 'move' | 'delete';
-    title: string;
-    parentId?: string;
-    pageId?: string;
-  } | null>(null);
-  const [completed, setCompleted] = useState<Set<string>>(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem('resource-completed-pages') || '[]');
-      return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []);
-    } catch {
-      return new Set();
-    }
-  });
+  const [codeTheme, setCodeTheme] = useState<'github' | 'night'>(() => (
+    localStorage.getItem('course-code-theme') === 'night' ? 'night' : 'github'
+ ));
+  const { dark, setDark } = useTheme();
+  const [toc, setToc] = useState<Array<{ id: string; text: string; level: number }>>([]);
+  const [modal, setModal] = useState<'create' | 'rename' | 'delete' | null>(null);
+  const [modalTitle, setModalTitle] = useState('');
+  const [modalError, setModalError] = useState('');
+
+  useEffect(() => {
+    const openSidebar = () => setMobileOpen(true);
+    window.addEventListener('course:open-mobile-sidebar', openSidebar);
+    return () => window.removeEventListener('course:open-mobile-sidebar', openSidebar);
+  }, []);
 
   const pages = useMemo(() => flattenResourcePages(tree), [tree]);
-  const folderCount = useMemo(() => countNodes(tree, 'folder'), [tree]);
-  const spaceCount = useMemo(() => countNodes(tree, 'space'), [tree]);
-  const progress = pages.length ? Math.round((completed.size / pages.length) * 100) : 0;
+  const rootTopics = useMemo(() => {
+    const overview = tree.find(node => node.type === 'page' && node.title.toLowerCase() === 'overview');
+    return overview?.children?.length ? overview.children : tree;
+  }, [tree]);
+  const html = selectedPage ? adfToHtml(selectedPage.body, selectedPage.title) : '';
 
   const loadTree = useCallback(async () => {
-    const controller = new AbortController();
     setTreeLoading(true);
     setTreeError('');
+    const controller = new AbortController();
     try {
       const nodes = await resourcesService.getTree(undefined, controller.signal);
       setTree(nodes);
-      setExpanded(collectExpandableNodeIds(nodes));
-      if (!pagePath) {
-        const firstPage = flattenResourcePages(nodes)[0];
-        if (firstPage) navigate(`/resources/${firstPage.id}`, { replace: true });
-      }
+      setSidebarView(current => current ? findNode(nodes, current.id) ?? current : null);
     } catch (error) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) {
-        setTreeError(error instanceof Error ? error.message : 'Unable to load Confluence folders');
+        setTreeError(error instanceof Error ? error.message : 'Unable to load resources');
       }
     } finally {
       setTreeLoading(false);
     }
-    return () => controller.abort();
   }, [navigate]);
 
-  useEffect(() => {
-    void loadTree();
-  }, [loadTree]);
+  useEffect(() => { void loadTree(); }, [loadTree]);
 
   useEffect(() => {
-    localStorage.setItem('resource-completed-pages', JSON.stringify([...completed]));
-  }, [completed]);
+    if (!selectedFolderId || !tree.length) return;
+    const storedFolder = findNode(tree, selectedFolderId);
+    if (storedFolder) setSidebarView(storedFolder);
+  }, [selectedFolderId, tree]);
 
   useEffect(() => {
-    localStorage.setItem('resources-sidebar-width', String(sidebarWidth));
+    if (!pagePath && pages.length) {
+      navigate(`/resources/${pages[0].id}`, { replace: true });
+    }
+  }, [navigate, pagePath, pages]);
+
+  useEffect(() => {
+    localStorage.setItem('course-sidebar-width', String(sidebarWidth));
   }, [sidebarWidth]);
 
   function startSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
@@ -88,514 +105,381 @@ export default function ResourcesPage() {
 
   function resizeSidebar(event: React.PointerEvent<HTMLDivElement>) {
     if (!resizingSidebar) return;
-    const viewportPadding = window.innerWidth < 768 ? 0 : 240;
-    const maxWidth = Math.min(480, window.innerWidth - viewportPadding);
-    setSidebarWidth(Math.max(240, Math.min(maxWidth, event.clientX)));
-  }
-
-  function stopSidebarResize() {
-    setResizingSidebar(false);
+    setSidebarWidth(Math.max(240, Math.min(420, event.clientX)));
   }
 
   useEffect(() => {
-    if (!pagePath && pages.length) {
-      navigate(`/resources/${pages[0].id}`, { replace: true });
-    }
-  }, [navigate, pagePath, pages]);
-
-  useEffect(() => {
-    if (!pagePath || !pages.length) return;
-    const pageExists = pages.some(page => page.id === pagePath);
-    if (!pageExists) {
-      navigate(`/resources/${pages[0].id}`, { replace: true });
-      return;
-    }
-
+    if (!pagePath) return;
     const controller = new AbortController();
+    let active = true;
     setPageLoading(true);
     setPageError('');
+    setSelectedPage(null);
     resourcesService.getPage(pagePath, controller.signal)
-      .then(setSelectedPage)
+      .then(page => {
+        if (active) setSelectedPage(page);
+      })
       .catch(error => {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        if (active && !(error instanceof DOMException && error.name === 'AbortError')) {
           setPageError(error instanceof Error ? error.message : 'Unable to load page');
         }
       })
-      .finally(() => setPageLoading(false));
-    return () => controller.abort();
+      .finally(() => {
+        if (active) setPageLoading(false);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [navigate, pagePath, pages]);
 
-  async function savePage() {
-    if (!selectedPage) return;
-    setSaveError('');
-    setSaved(false);
-    try {
-      const body = adfToHtml(selectedPage.body);
-      const updated = await resourcesService.updatePage(selectedPage.id, selectedPage.title, body);
-      setSelectedPage(updated);
-      setSaved(true);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Unable to save page');
+  useEffect(() => {
+    localStorage.setItem('course-code-theme', codeTheme);
+    document.querySelectorAll('.course-article-body').forEach(article => {
+      article.classList.toggle('code-theme-night', codeTheme === 'night');
+      article.classList.toggle('code-theme-github', codeTheme === 'github');
+    });
+  }, [codeTheme, html]);
+
+  useEffect(() => {
+    if (!html) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelectorAll<HTMLElement>('.course-article-body code[data-language]').forEach(block => {
+        const language = (block.dataset.language || 'plain').toLowerCase();
+        const prismLanguage = language === 'js' ? 'javascript' : language === 'ts' ? 'typescript' : language;
+        const grammar = Prism.languages[prismLanguage];
+        if (!grammar) return;
+        block.className = `language-${prismLanguage}`;
+        block.innerHTML = Prism.highlight(block.textContent || '', grammar, prismLanguage);
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [html, selectedPage?.id]);
+
+  useEffect(() => {
+    if (!html) {
+      setToc([]);
+      return;
     }
-  }
-
-  function openCreate(parentId?: string) {
-    setActionMenu(null);
-    setModal({ kind: 'create', title: '', parentId });
-  }
-
-  function openRename(pageId: string, title: string) {
-    setActionMenu(null);
-    setModal({ kind: 'rename', title, pageId });
-  }
-
-  function openCopy(pageId: string, title: string, parentId?: string | null) {
-    setActionMenu(null);
-    setModal({ kind: 'copy', title: `${title} copy`, pageId, parentId: parentId ?? undefined });
-  }
-
-  function openMove(pageId: string, title: string, parentId?: string | null) {
-    setActionMenu(null);
-    setModal({ kind: 'move', title, pageId, parentId: parentId ?? undefined });
-  }
-
-  function openDelete(pageId: string, title: string) {
-    setActionMenu(null);
-    setModal({ kind: 'delete', title, pageId });
-  }
+    const frame = window.requestAnimationFrame(() => {
+      const headings = [...document.querySelectorAll<HTMLElement>('.course-article-body h1, .course-article-body h2, .course-article-body h3')];
+      setToc(headings.map((heading, index) => {
+        const text = heading.textContent?.trim() || `Section ${index + 1}`;
+        const id = heading.id || text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `section-${index + 1}`;
+        heading.id = id;
+        return { id, text, level: Number(heading.tagName.slice(1)) };
+      }));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [html, selectedPage?.id]);
 
   async function submitModal() {
-    if (!modal) return;
-    setSaveError('');
+    setModalError('');
     try {
-      if (modal.kind === 'create') {
-        const spaceKey = selectedPage?.spaceKey || 'SUM';
-        const created = await resourcesService.createPage(modal.title.trim(), spaceKey, modal.parentId);
+      if (modal === 'create') {
+        const created = await resourcesService.createPage(modalTitle.trim(), selectedPage?.spaceKey || 'SUM', selectedPage?.id);
+        resourcesService.clearTreeCache();
+        resourcesService.clearPageCache(created.id);
         await loadTree();
         setModal(null);
         navigate(`/resources/${created.id}`);
-        return;
-      }
-
-      if (!modal.pageId) return;
-      if (modal.kind === 'rename') {
-        const page = await resourcesService.getPage(modal.pageId);
-        const updated = await resourcesService.updatePage(modal.pageId, modal.title.trim(), adfToHtml(page.body));
+      } else if (modal === 'rename' && selectedPage) {
+        const updated = await resourcesService.updatePage(selectedPage.id, modalTitle.trim(), adfToHtml(selectedPage.body));
         setSelectedPage(updated);
+        resourcesService.clearTreeCache();
+        resourcesService.clearPageCache(updated.id);
         await loadTree();
         setModal(null);
-        return;
-      }
-
-      if (modal.kind === 'copy') {
-        const source = await resourcesService.getPage(modal.pageId);
-        const created = await resourcesService.createPage(
-          modal.title.trim(),
-          source.spaceKey || selectedPage?.spaceKey || 'SUM',
-          modal.parentId,
-          adfToHtml(source.body),
-        );
-        await loadTree();
-        setModal(null);
-        navigate(`/resources/${created.id}`);
-        return;
-      }
-
-      if (modal.kind === 'move') {
-        const page = await resourcesService.getPage(modal.pageId);
-        await resourcesService.updatePage(modal.pageId, page.title, adfToHtml(page.body), modal.parentId);
-        await loadTree();
-        setModal(null);
-        return;
-      }
-
-      if (modal.kind === 'delete') {
-        await resourcesService.deletePage(modal.pageId);
+      } else if (modal === 'delete' && selectedPage) {
+        await resourcesService.deletePage(selectedPage.id);
+        resourcesService.clearTreeCache();
+        resourcesService.clearPageCache(selectedPage.id);
         setModal(null);
         await loadTree();
-        const remaining = flattenResourcePages(tree).filter(page => page.id !== modal.pageId);
-        if (remaining[0]) navigate(`/resources/${remaining[0].id}`, { replace: true });
-        else navigate('/resources', { replace: true });
+        const remaining = flattenResourcePages(tree).filter(page => page.id !== selectedPage.id);
+        navigate(remaining[0] ? `/resources/${remaining[0].id}` : '/resources', { replace: true });
       }
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Unable to complete action');
+      setModalError(error instanceof Error ? error.message : 'Unable to complete action');
     }
   }
 
-  function completePage() {
-    if (!selectedPage) return;
-    setCompleted(current => new Set(current).add(selectedPage.id));
-    const index = pages.findIndex(page => page.id === selectedPage.id);
-    if (index >= 0 && index < pages.length - 1) navigate(`/resources/${pages[index + 1].id}`);
-  }
+  const currentIndex = pages.findIndex(page => page.id === pagePath);
+  const previousPage = currentIndex > 0 ? pages[currentIndex - 1] : null;
+  const nextPage = currentIndex >= 0 && currentIndex < pages.length - 1 ? pages[currentIndex + 1] : null;
 
-  function toggleNode(id: string) {
-    setExpanded(current => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+  function renderSidebarList(nodes: ResourceTreeNode[]): ReactNode {
+    const visibleNodes = nodes.filter(node =>
+      !search || node.title.toLowerCase().includes(search.toLowerCase()) || nodeHasMatch(node, search)
+    );
+
+    return visibleNodes.map(node => {
+      const active = node.type === 'page' && pagePath === node.id;
+      const canOpen = node.type !== 'page' || node.children?.length > 0;
+
+      if (node.type === 'page' && !node.children?.length) {
+        return (
+          <Link
+            key={node.id}
+            to={`/resources/${node.id}`}
+            onClick={() => setMobileOpen(false)}
+            className={`course-sidebar-page ${active ? 'active' : ''}`}
+          >
+            <span className="course-sidebar-bullet" aria-hidden="true" />
+            <span>{node.title}</span>
+          </Link>
+        );
+      }
+
+      return (
+        <button
+          type="button"
+          key={node.id}
+          className={`course-sidebar-folder ${active ? 'active' : ''}`}
+          onClick={() => {
+            if (canOpen) {
+              setSidebarDirection('forward');
+              setSidebarView(node);
+              setSelectedFolderId(node.id);
+              localStorage.setItem('course-selected-folder-id', node.id);
+            }
+            if (node.type === 'page') navigate(`/resources/${node.id}`);
+          }}
+        >
+          <span className="course-sidebar-bullet course-sidebar-folder-bullet" aria-hidden="true" />
+          <span className="course-sidebar-folder-name">{node.title}</span>
+          <ChevronRight size={16} className="course-sidebar-chevron" />
+        </button>
+      );
     });
   }
 
-  function renderNode(node: ResourceTreeNode, depth = 0): ReactNode {
-    const matchesSearch = !search || node.title.toLowerCase().includes(search.toLowerCase());
-    if (node.type === 'page') {
-      if (!node.children?.length) {
-        if (!matchesSearch) return null;
-        return (
-          <div className="resources-sidebar-row" style={{ paddingLeft: depth * 12 }} key={node.id}>
-            <Link
-              to={`/resources/${node.id}`}
-              onClick={() => setMobileOpen(false)}
-              className={`resources-sidebar-page ${pagePath === node.id ? 'active' : ''}`}
-            >
-              <span className="resources-page-status">{completed.has(node.id) ? '✓' : '○'}</span>
-              <span>{node.title}</span>
-            </Link>
-            <button
-              type="button"
-              className="resources-node-more"
-              aria-label={`Actions for ${node.title}`}
-              onClick={() => setActionMenu(actionMenu === `page-${node.id}` ? null : `page-${node.id}`)}
-            >
-              <MoreHorizontal size={14} />
-            </button>
-            {actionMenu === `page-${node.id}` && (
-              <div className="resources-node-menu" role="menu">
-                <button type="button" role="menuitem" onClick={() => openCreate(node.id)}><CornerDownRight size={15} /> Create subpage</button>
-                <button type="button" role="menuitem" onClick={() => openRename(node.id, node.title)}><Pencil size={15} /> Rename</button>
-                <button type="button" role="menuitem" onClick={() => openCopy(node.id, node.title, node.parentId)}><Copy size={15} /> Copy</button>
-                <button type="button" role="menuitem" onClick={() => openMove(node.id, node.title, node.parentId)}><ArrowRight size={15} /> Move</button>
-                <button type="button" role="menuitem" className="danger" onClick={() => openDelete(node.id, node.title)}><Trash2 size={15} /> Delete</button>
-              </div>
-            )}
-          </div>
-        );
-      }
-      const isExpanded = search ? true : expanded.has(node.id);
-      return (
-        <div className="resources-sidebar-section" key={node.id}>
-          <div className="resources-parent-page" style={{ paddingLeft: depth * 12 }}>
-            <button type="button" className="resources-node-toggle" onClick={() => toggleNode(node.id)} aria-label="Toggle children">{isExpanded ? '▾' : '›'}</button>
-            <Link
-              to={`/resources/${node.id}`}
-              onClick={() => setMobileOpen(false)}
-              className={`resources-sidebar-page ${pagePath === node.id ? 'active' : ''}`}
-            >
-              <span className="resources-page-status">{completed.has(node.id) ? '✓' : '○'}</span>
-              <span>{node.title}</span>
-            </Link>
-            <button
-              type="button"
-              className="resources-node-more"
-              aria-label={`Actions for ${node.title}`}
-              onClick={() => setActionMenu(actionMenu === `page-${node.id}` ? null : `page-${node.id}`)}
-            >
-              <MoreHorizontal size={14} />
-            </button>
-            {actionMenu === `page-${node.id}` && (
-              <div className="resources-node-menu" role="menu">
-                <button type="button" role="menuitem" onClick={() => openCreate(node.id)}><CornerDownRight size={15} /> Create subpage</button>
-                <button type="button" role="menuitem" onClick={() => openRename(node.id, node.title)}><Pencil size={15} /> Rename</button>
-                <button type="button" role="menuitem" onClick={() => openCopy(node.id, node.title, node.parentId)}><Copy size={15} /> Copy</button>
-                <button type="button" role="menuitem" onClick={() => openMove(node.id, node.title, node.parentId)}><ArrowRight size={15} /> Move</button>
-                <button type="button" role="menuitem" className="danger" onClick={() => openDelete(node.id, node.title)}><Trash2 size={15} /> Delete</button>
-              </div>
-            )}
-          </div>
-          {isExpanded && node.children.map(child => renderNode(child, depth + 1))}
-        </div>
-      );
-    }
-
-    const hasMatches = !search || matchesSearch || nodeHasMatch(node, search);
-    if (!hasMatches) return null;
-    const isExpanded = search ? true : expanded.has(node.id);
-    return (
-      <div className="resources-sidebar-section" key={node.id}>
-        <div className="resources-parent-page" style={{ paddingLeft: depth * 12 }}>
-          <button type="button" className="resources-node-toggle" onClick={() => toggleNode(node.id)} aria-label="Toggle children">
-            {isExpanded ? '▾' : '›'}
-          </button>
-          <button type="button" className="resources-sidebar-title" style={{ flex: 1 }} onClick={() => toggleNode(node.id)}>
-            <span>{node.type === 'space' ? '⌘' : ''}</span>
-            <strong>{node.title}</strong>
-          </button>
-          {node.type === 'folder' && (
-            <button
-              type="button"
-              className="resources-node-more"
-              aria-label={`Actions for ${node.title}`}
-              onClick={() => setActionMenu(actionMenu === `folder-${node.id}` ? null : `folder-${node.id}`)}
-            ><MoreHorizontal size={14} /></button>
-          )}
-          {actionMenu === `folder-${node.id}` && (
-            <div className="resources-node-menu" role="menu">
-              <button type="button" role="menuitem" onClick={() => openCreate(node.id)}><CornerDownRight size={15} /> Create page</button>
-            </div>
-          )}
-        </div>
-        {isExpanded && node.children?.map(child => renderNode(child, depth + 1))}
-      </div>
-    );
-  }
-
-  const html = selectedPage ? adfToHtml(selectedPage.body) : '';
-  const breadcrumb = [];
-  let current = pages.find(page => page.id === pagePath);
-  while (current?.parentId) {
-    const parent = findNode(tree, current.parentId);
-    if (!parent) break;
-    breadcrumb.unshift(parent.title);
-    current = parent.type === 'page' ? parent : undefined;
-  }
-
   return (
-    <div className="resources-theme-root docs-root">
-      <header className="resources-docs-header">
-        <button type="button" className="resources-mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open sidebar">☰</button>
-        <Link to="/resources" className="resources-docs-brand" aria-label="Confluence resources">
-          <span className="resources-brand-mark" aria-hidden="true"><span /><span /></span>
-          <span className="resources-brand-name">Resources</span>
-        </Link>
-        <div className="resources-docs-header-spacer" />
-        <label className="confluence-search" onClick={() => setSearchOpen(true)}>
-          <Search size={16} />
-          {searchOpen && <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search in Resources" aria-label="Search pages" autoFocus />}
-          {!searchOpen && <span>Search</span>}
-        </label>
-        <button className="confluence-create-button" type="button" onClick={() => openCreate()} aria-label="Create page">
-          <Plus size={18} /><span>Create</span>
-        </button>
-        <button className="confluence-avatar" type="button" aria-label="Account menu">SN</button>
+    <div className="course-resource-root">
+
+      <header className="course-topbar">
+        <Button
+          variant="ghost"
+          size="icon"
+          type="button"
+          className="course-desktop-sidebar-toggle"
+          onClick={() => setSidebarCollapsed(value => !value)}
+          aria-label={sidebarCollapsed ? 'Open sidebar' : 'Close sidebar'}
+        >
+          {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+        </Button>
+        <Link to="/resources" className="course-brand">Sumanth&apos;s Resources</Link>
+        <nav className="course-topnav" aria-label="Resource views">
+        </nav>
+        <div className="course-top-actions">
+          <Button type="button" variant="ghost" size="icon" aria-label="Search" onClick={() => setSearchOpen(value => !value)}><Search size={17} /></Button>
+          <Button type="button" variant="ghost" size="icon" aria-label="Toggle theme" onClick={() => setDark(value => !value)}>{dark ? <Sun size={17} /> : <Moon size={17} />}</Button>
+        </div>
       </header>
-      <div
-        className={`resources-main-row ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${resizingSidebar ? 'sidebar-resizing' : ''}`}
-        style={{ '--resources-sidebar-width': `${sidebarWidth}px` } as CSSProperties}
+
+      {searchOpen && (
+        <div className="course-search-popover">
+          <Search size={16} />
+          <Input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search the course" aria-label="Search pages" autoFocus />
+          {search && <Button type="button" variant="ghost" size="icon" onClick={() => setSearch('')} aria-label="Clear search"><X size={15} /></Button>}
+        </div>
+      )}
+
+      <main
+        className={`course-layout ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${rightSidebarCollapsed ? 'right-sidebar-collapsed' : ''} ${resizingSidebar ? 'sidebar-resizing' : ''}`}
+        style={{ '--course-sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
       >
-        <aside className={`resources-sidebar sidebar-desktop ${mobileOpen ? 'mobile-open' : ''}`}>
-          {mobileOpen && <button type="button" className="resources-mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close sidebar">×</button>}
-          <div className="confluence-space-header">
-            <div className="confluence-space-icon">S</div>
-            <div>
-              <strong>Sumanth</strong>
-              <span>Knowledge base</span>
-            </div>
-            <button type="button" aria-label="Space actions" onClick={() => setActionMenu(actionMenu === 'space' ? null : 'space')}><MoreHorizontal size={18} /></button>
-            {actionMenu === 'space' && (
-              <div className="resources-space-menu" role="menu">
-                <button type="button" onClick={() => openCreate()}><Plus size={15} /> Create page</button>
-                <button type="button" onClick={() => setSidebarCollapsed(true)}><EyeOff size={15} /> Hide sidebar</button>
-              </div>
+        <aside className={`course-sidebar ${mobileOpen ? 'open' : ''}`}>
+          <div className="course-sidebar-mobile-head">
+            <button type="button" onClick={() => setMobileOpen(false)} aria-label="Close curriculum"><X size={18} /></button>
+          </div>
+          <nav className="course-curriculum" aria-label="Course curriculum">
+            {treeLoading && <div className="course-loading">Loading curriculum...</div>}
+            {treeError && <div className="course-error">{treeError}</div>}
+            {!treeLoading && !treeError && (
+              sidebarView ? (
+                <div key={`topic-${sidebarView.id}`} className="course-sidebar-drilldown course-sidebar-view-forward">
+                  <button type="button" className="course-sidebar-back" onClick={() => {
+                    setSidebarDirection('back');
+                    setSidebarView(null);
+                    setSelectedFolderId(null);
+                    localStorage.removeItem('course-selected-folder-id');
+                  }}>
+                    <ArrowLeft size={15} />
+                    <span>All topics</span>
+                  </button>
+                  <div className="course-sidebar-view-title">
+                    <h2>{sidebarView.title}</h2>
+                  </div>
+                  <div className="course-sidebar-list">
+                    {sidebarView.children?.length
+                      ? renderSidebarList(sidebarView.children)
+                      : <span className="course-sidebar-empty">No pages in this section yet.</span>}
+                  </div>
+                </div>
+              ) : (
+                <div key="topics-root" className={`course-sidebar-root ${sidebarDirection === 'back' ? 'course-sidebar-view-back' : ''}`}>
+                  <div className="course-sidebar-view-title">
+                  </div>
+                  <div className="course-sidebar-list">{renderSidebarList(rootTopics)}</div>
+                </div>
+              )
             )}
-          </div>
-          <nav className="confluence-space-tabs" aria-label="Space navigation">
-            <button type="button" onClick={() => {
-              const overview = pages.find(page => page.title.toLowerCase() === 'overview') ?? pages[0];
-              if (overview) navigate(`/resources/${overview.id}`);
-            }}>Overview</button>
-            <button type="button" className="active">Pages</button>
-            <button type="button" onClick={() => setSearch('blog')}>Blog</button>
           </nav>
-          <div className="confluence-resource-stats" aria-label="Resource statistics">
-            <div><strong>{pages.length.toLocaleString()}</strong><span>Pages</span></div>
-            <div><strong>{folderCount.toLocaleString()}</strong><span>Folders</span></div>
-            <div><strong>{spaceCount.toLocaleString()}</strong><span>Spaces</span></div>
-          </div>
-          <div className="confluence-sidebar-actions">
-            <button type="button" onClick={() => openCreate()}><Plus size={15} /> Create</button>
-            <button type="button" aria-label="More options"><MoreHorizontal size={16} /></button>
-          </div>
-          {treeLoading ? <div className="resources-loading">Loading Confluence…</div> : null}
-          {treeError ? (
-            <div className="resources-error"><span>{treeError}</span><button type="button" onClick={() => void loadTree()}>Retry</button></div>
-          ) : (
-            <nav aria-label="Confluence resource pages">{tree.map(node => renderNode(node))}</nav>
-          )}
+          <Button type="button" variant="outline" className="course-sidebar-add" onClick={() => { setModalTitle(''); setModal('create'); }}>
+            <Plus size={15} /> Add page
+          </Button>
         </aside>
         {!sidebarCollapsed && (
           <div
-            className="resources-sidebar-resizer"
+            className="course-sidebar-resizer"
             role="separator"
             aria-label="Resize sidebar"
             aria-orientation="vertical"
             aria-valuemin={240}
-            aria-valuemax={480}
+            aria-valuemax={420}
             aria-valuenow={sidebarWidth}
             tabIndex={0}
             onPointerDown={startSidebarResize}
             onPointerMove={resizeSidebar}
-            onPointerUp={stopSidebarResize}
-            onPointerCancel={stopSidebarResize}
-            onDoubleClick={() => setSidebarWidth(280)}
+            onPointerUp={() => setResizingSidebar(false)}
+            onPointerCancel={() => setResizingSidebar(false)}
+            onDoubleClick={() => setSidebarWidth(300)}
             onKeyDown={event => {
-              if (event.key === 'ArrowLeft') setSidebarWidth(width => Math.max(240, width - 16));
-              if (event.key === 'ArrowRight') setSidebarWidth(width => Math.min(480, width + 16));
+              if (event.key === 'ArrowLeft') setSidebarWidth(value => Math.max(240, value - 16));
+              if (event.key === 'ArrowRight') setSidebarWidth(value => Math.min(420, value + 16));
             }}
           />
         )}
-        <section className="docs-editor-shell">
-          <div className="docs-actionbar">
-            <button
-              type="button"
-              className="resources-sidebar-toggle"
-              aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-              onClick={() => setSidebarCollapsed(value => !value)}
-            >
-              {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
-            </button>
-            <div className="docs-breadcrumb">
-              <span className="breadcrumb-space">Sumanth</span>
-              <ChevronRight size={14} />
-              {breadcrumb.map(item => <span className="breadcrumb-item" key={item}>{item}<ChevronRight size={14} /></span>)}
-              <strong>{selectedPage?.title ?? 'Loading'}</strong>
-            </div>
-            <div className="docs-actions">
-              <button type="button" className="confluence-lock-button" aria-label="Page restrictions"><Lock size={16} /></button>
-              <button
-                type="button"
-                className={`confluence-star-button ${selectedPage && completed.has(selectedPage.id) ? 'active' : ''}`}
-                aria-label="Watch page"
-                onClick={() => selectedPage && setCompleted(current => new Set(current).add(selectedPage.id))}
-              ><Star size={16} /></button>
-              <button type="button" className="confluence-share-button" onClick={() => void navigator.clipboard?.writeText(window.location.href)}><Share2 size={15} /> Share</button>
-              <button type="button" className="docs-save-button" onClick={() => void savePage()}>{saved ? 'Saved' : 'Save'}</button>
-              <div className="resources-page-menu-wrap">
-                <button
-                  type="button"
-                  className="confluence-more-button"
-                  aria-label="More page actions"
-                  onClick={() => setActionMenu(actionMenu === 'page-more' ? null : 'page-more')}
-                ><MoreHorizontal size={18} /></button>
-                {actionMenu === 'page-more' && selectedPage && (
-                  <div className="resources-page-menu" role="menu">
-                    <button type="button" onClick={() => openCreate(selectedPage.id)}><CornerDownRight size={15} /> Create subpage</button>
-                    <button type="button" onClick={() => openRename(selectedPage.id, selectedPage.title)}><Pencil size={15} /> Rename</button>
-                    <button type="button" onClick={() => openCopy(selectedPage.id, selectedPage.title, selectedPage.parentId)}><Copy size={15} /> Copy</button>
-                    <button type="button" onClick={() => openMove(selectedPage.id, selectedPage.title, selectedPage.parentId)}><ArrowRight size={15} /> Move</button>
-                    <button type="button" onClick={() => void navigator.clipboard?.writeText(window.location.href)}><Link2 size={15} /> Copy link</button>
-                    <button type="button" className="danger" onClick={() => openDelete(selectedPage.id, selectedPage.title)}><Trash2 size={15} /> Move to trash</button>
-                  </div>
-                )}
+        {mobileOpen && <button type="button" className="course-mobile-backdrop" onClick={() => setMobileOpen(false)} aria-label="Close menu" />}
+
+        <section className="course-article-scroll">
+          {pageLoading && <div className="course-loading course-page-loading">Loading page...</div>}
+          {pageError && <div className="course-error course-page-error">{pageError}</div>}
+          {!pageLoading && !pageError && selectedPage && (
+            <article className="course-article">
+              <div className="course-breadcrumb">
+                <Link to="/resources">Resources</Link>
+                <ChevronRight size={13} />
+                <span>{selectedPage.title}</span>
               </div>
-            </div>
-          </div>
-          <div className="docs-editor-scroll">
-            <div className="docs-article-layout">
-              <article className="docs-article">
-                {pageLoading ? <div className="resources-loading">Loading page…</div> : null}
-                {pageError ? <div className="resources-error"><span>{pageError}</span><button type="button" onClick={() => pagePath && navigate(`/resources/${pagePath}`, { replace: true })}>Retry</button></div> : null}
-                {saveError ? <div className="resources-error"><span>{saveError}</span></div> : null}
-                {!pageLoading && selectedPage && (
-                  <>
-                    <header className="docs-article-header">
-                      <h1>{selectedPage.title}</h1>
-                      <div className="confluence-page-meta">
-                        <span className="confluence-page-owner">SN</span>
-                        <span>{selectedPage.lastModifiedBy || 'Sumanth'}</span>
-                        <span>updated {selectedPage.lastModifiedAt ? new Date(selectedPage.lastModifiedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'recently'}</span>
-                      </div>
-                    </header>
-                    <div className="resources-editor-content" dangerouslySetInnerHTML={{ __html: html }} />
-                  </>
-                )}
-              </article>
-              <aside className="docs-toc"><div className="docs-toc-inner"><div className="docs-toc-title">Confluence content</div></div></aside>
-            </div>
-          </div>
-        </section>
-      </div>
-      {modal && (
-        <div className="resources-modal-backdrop" role="presentation" onMouseDown={event => {
-          if (event.target === event.currentTarget) setModal(null);
-        }}>
-          <div className="resources-action-modal" role="dialog" aria-modal="true" aria-labelledby="resources-modal-title">
-            <div className="resources-action-modal-header">
-              <h2 id="resources-modal-title">
-                {modal.kind === 'create' ? (modal.parentId ? 'Create subpage' : 'Create page') :
-                  modal.kind === 'rename' ? 'Rename page' :
-                  modal.kind === 'copy' ? 'Copy page' :
-                  modal.kind === 'move' ? 'Move page' : 'Move page to trash'}
-              </h2>
-              <button type="button" onClick={() => setModal(null)} aria-label="Close">×</button>
-            </div>
-            <div className="resources-action-modal-body">
-              {modal.kind === 'delete' ? (
-                <p>Move <strong>{modal.title}</strong> to trash? You can restore it from Confluence.</p>
-              ) : modal.kind === 'move' ? (
-                <label>
-                  New parent
-                  <select value={modal.parentId ?? ''} onChange={event => setModal({ ...modal, parentId: event.target.value || undefined })}>
-                    <option value="">Space root</option>
-                    {pages.filter(page => page.id !== modal.pageId).map(page => (
-                      <option key={page.id} value={page.id}>{page.title}</option>
-                    ))}
-                  </select>
-                </label>
+
+              <header className="course-article-header">
+                <h1>{selectedPage.title}</h1>
+                <div className="course-article-actions">
+                  <Button type="button" variant="ghost" size="icon" onClick={() => { setModalTitle(selectedPage.title); setModal('rename'); }} aria-label="Rename page"><Pencil size={14} /></Button>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => setModal('delete')} aria-label="Delete page"><Trash2 size={14} /></Button>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => void navigator.clipboard?.writeText(window.location.href)} aria-label="Copy link"><Copy size={14} /></Button>
+                </div>
+              </header>
+
+              {html.trim() ? (
+                <div className="course-article-body" dangerouslySetInnerHTML={{ __html: html }} onClick={event => {
+                  const target = event.target as HTMLElement;
+                  const copyButton = target.closest('.adf-code-copy-button');
+                  if (copyButton) {
+                    const block = copyButton.closest('.adf-code-block');
+                    const code = block?.querySelector('code')?.textContent ?? '';
+                    void navigator.clipboard?.writeText(code);
+                    copyButton.classList.add('copied');
+                    window.setTimeout(() => copyButton.classList.remove('copied'), 1200);
+                    return;
+                  }
+                  const themeButton = target.closest('.adf-code-theme-button');
+                  if (themeButton) setCodeTheme(current => current === 'github' ? 'night' : 'github');
+                }} />
               ) : (
-                <label>
-                  {modal.kind === 'rename' ? 'Page name' : modal.kind === 'copy' ? 'Copied page name' : 'Page title'}
-                  <input
-                    value={modal.title}
-                    onChange={event => setModal({ ...modal, title: event.target.value })}
-                    placeholder="Enter a title"
-                    autoFocus
-                    onKeyDown={event => {
-                      if (event.key === 'Enter') void submitModal();
-                    }}
-                  />
-                </label>
+                <div className="course-article-empty" role="status">
+                  This page has no published content yet. Try again later or choose another page from the curriculum.
+                </div>
               )}
-              {saveError && <div className="resources-modal-error">{saveError}</div>}
-            </div>
-            <div className="resources-action-modal-footer">
-              <button type="button" className="resources-modal-cancel" onClick={() => setModal(null)}>Cancel</button>
+
+              {(previousPage || nextPage) && (
+                <nav className="course-page-nav">
+                  {previousPage ? (
+                    <Link to={`/resources/${previousPage.id}`} className="previous">
+                      <span><ChevronLeft size={14} /> Previous</span>
+                      <strong>{previousPage.title}</strong>
+                    </Link>
+                  ) : <span />}
+                  {nextPage ? (
+                    <Link to={`/resources/${nextPage.id}`} className="next">
+                      <span>Next <ChevronRight size={14} /></span>
+                      <strong>{nextPage.title}</strong>
+                    </Link>
+                  ) : <span />}
+                </nav>
+              )}
+
+              <footer className="course-footer">How React Works · © 2026 Sumanth Nagireddi</footer>
+            </article>
+          )}
+        </section>
+
+        <aside className={`course-right-sidebar ${rightSidebarCollapsed ? 'collapsed' : ''}`}>
+          <Button
+            variant="ghost"
+            size="icon"
+            type="button"
+            className="course-right-toggle"
+            onClick={() => setRightSidebarCollapsed(value => !value)}
+            aria-label={rightSidebarCollapsed ? 'Open page outline' : 'Close page outline'}
+          >
+            {rightSidebarCollapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
+          </Button>
+          <div className="course-right-inner">
+            <h2>On this page</h2>
+            {toc.length ? toc.map(item => (
               <button
                 type="button"
-                className={modal.kind === 'delete' ? 'resources-modal-danger' : 'resources-modal-primary'}
-                disabled={(modal.kind !== 'delete' && modal.kind !== 'move' && !modal.title.trim())}
-                onClick={() => void submitModal()}
+                key={item.id}
+                className={item.level === 3 ? 'level-3' : ''}
+                onClick={() => {
+                  const heading = document.getElementById(item.id);
+                  heading?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
               >
-                {modal.kind === 'delete' ? 'Move to trash' : modal.kind === 'move' ? 'Move' : modal.kind === 'copy' ? 'Copy' : modal.kind === 'rename' ? 'Rename' : 'Create'}
+                {item.text}
               </button>
+            )) : <span className="course-right-empty">No headings</span>}
+          </div>
+        </aside>
+      </main>
+
+      {modal && (
+        <div className="course-modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModal(null); }}>
+          <div className="course-modal" role="dialog" aria-modal="true" aria-labelledby="course-modal-title">
+            <div className="course-modal-head">
+              <h2 id="course-modal-title">{modal === 'create' ? 'Create page' : modal === 'rename' ? 'Rename page' : 'Move page to trash'}</h2>
+              <Button type="button" variant="ghost" size="icon" onClick={() => setModal(null)} aria-label="Close"><X size={18} /></Button>
+            </div>
+            {modal === 'delete' ? <p>Move <strong>{selectedPage?.title}</strong> to trash?</p> : (
+              <label>
+                <span>Page title</span>
+                <Input value={modalTitle} onChange={event => setModalTitle(event.target.value)} autoFocus onKeyDown={event => { if (event.key === 'Enter') void submitModal(); }} />
+              </label>
+            )}
+            {modalError && <div className="course-error">{modalError}</div>}
+            <div className="course-modal-actions">
+              <Button type="button" variant="outline" onClick={() => setModal(null)}>Cancel</Button>
+              <Button type="button" onClick={() => void submitModal()} className="primary">{modal === 'delete' ? 'Move to trash' : 'Save'}</Button>
             </div>
           </div>
         </div>
       )}
-      {mobileOpen && <button type="button" className="resources-mobile-backdrop" onClick={() => setMobileOpen(false)} aria-label="Close sidebar overlay" />}
     </div>
   );
 }
 
-function findNode(nodes: ResourceTreeNode[], id: string): ResourceTreeNode | undefined {
+function findNode(nodes: ResourceTreeNode[], id: string): ResourceTreeNode | null {
   for (const node of nodes) {
     if (node.id === id) return node;
     const child = findNode(node.children ?? [], id);
     if (child) return child;
   }
-  return undefined;
-}
-
-function countNodes(nodes: ResourceTreeNode[], type: ResourceTreeNode['type']): number {
-  return nodes.reduce((total, node) => {
-    return total + (node.type === type ? 1 : 0) + countNodes(node.children ?? [], type);
-  }, 0);
-}
-
-function collectExpandableNodeIds(nodes: ResourceTreeNode[]): Set<string> {
-  const ids = new Set<string>();
-  const visit = (node: ResourceTreeNode) => {
-    if (node.children?.length) ids.add(node.id);
-  };
-  nodes.forEach(visit);
-  return ids;
+  return null;
 }
 
 function nodeHasMatch(node: ResourceTreeNode, search: string): boolean {
-  if (!search) return true;
-  const query = search.toLowerCase();
-  return node.children?.some(child =>
-    child.title.toLowerCase().includes(query) || nodeHasMatch(child, search)
-  ) ?? false;
+  return node.children?.some(child => child.title.toLowerCase().includes(search.toLowerCase()) || nodeHasMatch(child, search)) ?? false;
 }

@@ -40,16 +40,55 @@ function renderMarks(node: AdfNode): string {
   return value;
 }
 
-export function adfToHtml(body: string): string {
+export function adfToHtml(body: string, pageTitle = ''): string {
   if (!body) return '';
   let doc: AdfNode;
   try {
     doc = JSON.parse(body);
   } catch {
-    return body;
+    return sanitizeHtml(body);
   }
 
-  const renderChildren = (nodes: AdfNode[] = []) => nodes.map(renderNode).join('');
+  let contentNodes = doc.content ?? [];
+  if (pageTitle && contentNodes[0]?.type === 'heading') {
+    const firstHeading = renderPlainText(contentNodes[0]);
+    if (firstHeading.trim().toLowerCase() === pageTitle.trim().toLowerCase()) {
+      contentNodes = contentNodes.slice(1);
+      if (contentNodes[0]?.type === 'rule') contentNodes = contentNodes.slice(1);
+    }
+  }
+
+  const languageNames = new Set(['javascript', 'js', 'jsx', 'typescript', 'ts', 'tsx', 'html', 'css', 'json', 'bash', 'shell', 'sql', 'java', 'python', 'xml', 'yaml']);
+
+  function renderPlainText(node: AdfNode): string {
+    if (node.type === 'text') return node.text ?? '';
+    return (node.content ?? []).map(renderPlainText).join('');
+  }
+
+  const renderChildren = (nodes: AdfNode[] = []) => {
+    const output: string[] = [];
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index];
+      const next = nodes[index + 1];
+      if (node.type === 'paragraph' && next?.type === 'codeBlock') {
+        const language = renderPlainText(node).trim().toLowerCase();
+        if (languageNames.has(language)) {
+          output.push(renderCodeBlock(next, language));
+          index += 1;
+          continue;
+        }
+      }
+      output.push(renderNode(node));
+    }
+    return output.join('');
+  };
+
+  function renderCodeBlock(node: AdfNode, inferredLanguage = ''): string {
+    const language = escapeHtml(String(node.attrs?.language ?? inferredLanguage ?? '').trim());
+    const label = language ? `<span class="adf-code-language">${language}</span>` : '';
+    const code = renderChildren(node.content);
+    return `<div class="adf-code-block"><div class="adf-code-header">${label}<div class="adf-code-actions"><button type="button" class="adf-code-theme-button" aria-label="Change code theme"><span>Theme</span></button><button type="button" class="adf-code-copy-button" aria-label="Copy code"><span class="adf-copy-icon" aria-hidden="true"></span></button></div></div><pre><code${language ? ` data-language="${language}"` : ''}>${code}</code></pre></div>`;
+  }
 
   function renderNode(node: AdfNode): string {
     const children = renderChildren(node.content);
@@ -65,11 +104,7 @@ export function adfToHtml(body: string): string {
       case 'orderedList': return `<ol>${children}</ol>`;
       case 'listItem': return `<li>${children}</li>`;
       case 'blockquote': return `<blockquote>${children}</blockquote>`;
-      case 'codeBlock': {
-        const language = escapeHtml(String(node.attrs?.language ?? ''));
-        const label = language ? `<span class="adf-code-language">${language}</span>` : '';
-        return `<div class="adf-code-block">${label}<pre><code${language ? ` data-language="${language}"` : ''}>${children}</code></pre></div>`;
-      }
+      case 'codeBlock': return renderCodeBlock(node);
       case 'rule': return '<hr>';
       case 'table': return `<div class="adf-table-wrap"><table class="adf-table">${children}</table></div>`;
       case 'tableRow': return `<tr>${children}</tr>`;
@@ -114,9 +149,14 @@ export function adfToHtml(body: string): string {
       }
       case 'mediaSingle':
       case 'mediaGroup':
-        return `<figure>${children}</figure>`;
-      case 'media':
+      case 'embedCard':
+        return `<figure class="adf-media-block">${children}</figure>`;
+      case 'media': {
+        const alt = escapeHtml(String(node.attrs?.alt ?? 'Confluence media'));
+        const url = String(node.attrs?.url ?? node.attrs?.src ?? '');
+        if (url) return `<img class="adf-media-image" src="${escapeHtml(url)}" alt="${alt}">`;
         return '<div class="adf-media-placeholder"><span>Media attachment</span></div>';
+      }
       case 'caption': return `<figcaption>${children}</figcaption>`;
       case 'date': return escapeHtml(String(node.attrs?.timestamp ?? ''));
       case 'mention': return `<strong>@${escapeHtml(String(node.attrs?.text ?? node.attrs?.id ?? 'user'))}</strong>`;
@@ -143,12 +183,17 @@ export function adfToHtml(body: string): string {
       case 'decisionList': return `<div class="adf-decision-list">${children}</div>`;
       case 'decisionItem':
         return `<div class="adf-decision-item"><span aria-hidden="true">✓</span><div>${children}</div></div>`;
+      case 'body':
+      case 'bodiedExtension':
+        return `<div class="adf-bodied-extension">${children}</div>`;
+      case 'externalLink':
+        return `<a class="adf-external-link" href="${escapeHtml(String(node.attrs?.url ?? '#'))}" target="_blank" rel="noopener noreferrer">${children}</a>`;
       case 'doc':
       default: return children;
     }
   }
 
-  return sanitizeHtml(renderChildren(doc.content));
+  return sanitizeHtml(renderChildren(contentNodes));
 }
 
 export function sanitizeHtml(html: string): string {

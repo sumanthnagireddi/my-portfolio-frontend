@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { environment } from '@/shared/config/env';
+import { Button } from '@/shared/components/ui/button';
 
 type ForecastPoint = {
   date: string;
@@ -258,12 +259,12 @@ export default function GoldPredictionPage() {
             </p>
           </div>
           <div className="gold-hero__actions">
-            <button onClick={rerunForecast} disabled={runningNow}>
+            <Button onClick={rerunForecast} disabled={runningNow}>
               {runningNow ? 'Running...' : 'Run now'}
-            </button>
-            <button className="secondary" onClick={() => void reloadRuns(true, selectedRunId)}>
+            </Button>
+            <Button variant="outline" className="secondary" onClick={() => void reloadRuns(true, selectedRunId)}>
               {refreshing ? 'Refreshing...' : 'Refresh list'}
-            </button>
+            </Button>
           </div>
         </header>
 

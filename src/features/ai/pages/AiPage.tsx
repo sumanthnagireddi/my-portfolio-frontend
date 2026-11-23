@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { environment } from '@/shared/config/env';
+import { Button } from '@/shared/components/ui/button';
+import { Textarea } from '@/shared/components/ui/textarea';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
@@ -45,20 +47,20 @@ export default function AiPage() {
       <aside className={`ai-agent-sidebar`}>
         <div className="ai-agent-sidebar-head">
           <span>Conversations</span>
-          <button type="button" onClick={() => { setMessages([]); sessionRef.current = ''; }} aria-label="New chat">＋</button>
+          <Button type="button" variant="ghost" size="icon" onClick={() => { setMessages([]); sessionRef.current = ''; }} aria-label="New chat">＋</Button>
         </div>
-        <button type="button" className="ai-agent-new" onClick={() => { setMessages([]); sessionRef.current = ''; }}>＋ <span>New agent chat</span></button>
+        <Button type="button" variant="secondary" className="ai-agent-new" onClick={() => { setMessages([]); sessionRef.current = ''; }}>＋ <span>New agent chat</span></Button>
         <div className="ai-agent-history">
           <Link to="/ai/jobs" className="ai-agent-history-item">AI Job Agent</Link>
         </div>
-        <button type="button" className="ai-agent-clear" onClick={() => { setMessages([]); sessionRef.current = ''; }}>Clear chat</button>
+        <Button type="button" variant="ghost" className="ai-agent-clear" onClick={() => { setMessages([]); sessionRef.current = ''; }}>Clear chat</Button>
       </aside>
       <section className="ai-agent-main">
         <header className="ai-agent-header">
           <div className="ai-agent-status"><span className="ai-agent-status-dot" /> Agent ready</div>
           <div className="ai-agent-mode">
-            <button type="button" className="active">chat</button>
-            <button type="button" onClick={() => window.location.assign('/ai/jobs')}>jobs</button>
+            <Button type="button" variant="secondary" size="sm" className="active">chat</Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => window.location.assign('/ai/jobs')}>jobs</Button>
           </div>
         </header>
         <div className="ai-agent-scroll custom-scrollbar">
@@ -74,10 +76,10 @@ export default function AiPage() {
         </div>
         <div className="ai-agent-composer-wrap">
         <form className="ai-agent-composer" onSubmit={submit}>
-          <textarea value={input} onChange={event => setInput(event.target.value)} onKeyDown={event => {
+          <Textarea value={input} onChange={event => setInput(event.target.value)} onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
           }} placeholder="Ask the agent…" rows={2} />
-          <div className="ai-agent-composer-actions"><div /><button className="ai-agent-send" type="submit" disabled={!input.trim() || loading}>↑</button></div>
+          <div className="ai-agent-composer-actions"><div /><Button variant="default" size="icon" className="ai-agent-send" type="submit" disabled={!input.trim() || loading}>↑</Button></div>
         </form>
         <div className="ai-agent-footnote">AI may make mistakes. Verify important information.</div>
         </div>
